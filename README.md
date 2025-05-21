@@ -293,14 +293,6 @@ So _from is a metadata about who is asking
 - this is pushing the newest operation to the front of exiting history list
     - when we are displaying the list we use `Enum.reverse(state)` so the oldest is on the top
 
-### Commit and push
-
-```elixir
-git add calculator_server.ex README.md
-git commit -m "Phase 2: Add GenServer for calculator state and history"
-git push
-```
-
 ---
 
 ## ✅ **Phase 3: Add Phoenix (JSON API)**
@@ -321,7 +313,165 @@ git push
 - Routes (e.g., `post /api/calc/add`)
 - Return JSON with `json(conn, %{result: ...})`
 
-✅ You now understand how Phoenix works as a backend API
+We’ll expose CalculatorServer through a simple web API using Phoenix, so it can:
+
+- send calculator operations over HTTP (`POST /api/add`)
+- see the history (`GET / api/history`)
+- clear the memory (`DELETE /api/history`)
+
+This can later be connected: 
+
+- a frontend (live view or flutter)
+- or test requests using tools like Postman or curl
+
+Generate new Phoenix API project:
+
+```elixir
+mix phx.new calc_api --no-html --no-assets --no-livels
+cd calc_api
+```
+
+- `--no-html` → no LiveView or templates
+- `--no-assets` → no JavaScript or CSS
+- `--no-live` → we’ll add LiveView later in phase 4
+
+1. We add exiting files in `lib/calc_api` 
+2. then we add CalculatorServer in supervision tree. In `lib/calc_api/application.ex`, inside `children = [` add:
+
+```elixir
+CalculatorServer
+```
+
+	It looks like this:
+
+```elixir
+children = [
+  CalculatorServer
+]
+```
+
+Now it will automatically start and be supervised 
+
+1. add routes and controller 
+In `lib/calc_api_web/router.ex`, inside the API scope, add:
+    
+    ```elixir
+    scope "/api", CalcApiWeb do
+      post "/add", CalcController, :add
+      post "/sub", CalcController, :sub
+      post "/mul", CalcController, :mul
+      post "/div", CalcController, :div
+      get "/history", CalcController, :history
+      delete "/history", CalcController, :clear_history
+    end
+    ```
+    
+2. create the controller 
+    1. Create a file: `lib/calc_api_web/controllers/calc_controller.ex`
+    
+    ```elixir
+    defmodule CalcApiWeb.CalcController do
+      use CalcApiWeb, :controller
+    
+      def add(conn, %{"a" => a, "b" => b}) do
+        json(conn, %{result: CalculatorServer.add(a, b)})
+      end
+    
+      def sub(conn, %{"a" => a, "b" => b}) do
+        json(conn, %{result: CalculatorServer.sub(a, b)})
+      end
+    
+      def mul(conn, %{"a" => a, "b" => b}) do
+        json(conn, %{result: CalculatorServer.mul(a, b)})
+      end
+    
+      def div(conn, %{"a" => a, "b" => b}) do
+        json(conn, %{result: CalculatorServer.div(a, b)})
+      end
+    
+      def history(conn, _params) do
+        json(conn, %{history: CalculatorServer.history()})
+      end
+    
+      def clear_history(conn, _params) do
+        CalculatorServer.clear_history()
+        send_resp(conn, 204, "")
+      end
+    end
+    ```
+    
+3. Test it:
+    
+    ```elixir
+    mix phx.server
+    
+    ```
+    
+
+Open a new terminal and run: 
+
+```elixir
+curl -X POST http://localhost:4000/api/div -H "Content-Type: application/json" -d '{"a": 9, "b": 3}'
+curl -X POST http://localhost:4000/api/add -H "Content-Type: application/json" -d '{"a": 2, "b": 3}'
+curl -X POST http://localhost:4000/api/mul -H "Content-Type: application/json" -d '{"a": 6, "b": 7}'
+curl http://localhost:4000/api/history
+```
+
+We need to fix function `def handle_call(:history, _from, state)` because the history doesn’t work:
+
+```elixir
+def handle_call(:history, _from, state) do
+    history_as_maps = Enum.map(Enum.reverse(state), fn
+      {:add, a, b, result} -> %{
+        operation: "add",
+        a: a,
+        b: b,
+        result: result
+      }
+      {:sub, a, b, result} -> %{
+        operation: "sub",
+        a: a,
+        b: b,
+        result: result
+      }
+      {:mul, a, b, result} -> %{
+        operation: "mul",
+        a: a,
+        b: b,
+        result: result
+      }
+      {:div, a, b, result} -> %{
+        operation: "div",
+        a: a,
+        b: b,
+        result: result
+      }
+    end)
+
+    {:reply, history_as_maps, state}
+  end
+```
+
+### Lesson from this error:
+
+only return JSON-serializable data 
+
+Phoenix uses the Jason library to serialize data into JSON, that means:
+
+- maps, lists, strings, numbers, booleans and nil fine
+- tuples, atoms and custom struct are not automatically JSON-compatible
+
+This fails:
+
+```elixir
+json(conn, {:ok, 123})
+```
+
+this works:
+
+```elixir
+json(conn, %{result: 123})
+```
 
 ---
 
